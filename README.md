@@ -28,7 +28,7 @@
 1. 克隆代码库:
 
 ```bash
-git clone https://github.com/yourusername/luogu_problem_generator.git
+git clone https://github.com/LQS686/luogu_problem_generator.git
 cd luogu_problem_generator
 ```
 
