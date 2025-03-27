@@ -18,7 +18,7 @@
 
 ### 环境要求
 
-- Python 3.8+
+- Python 3.10+
 - PyQt6
 - requests (API调用)
 - 网络连接（用于API调用）
@@ -28,7 +28,7 @@
 1. 克隆代码库:
 
 ```bash
-git clone https://github.com/yourusername/luogu_problem_generator.git
+git clone https://github.com/LQS686/luogu_problem_generator.git
 cd luogu_problem_generator
 ```
 

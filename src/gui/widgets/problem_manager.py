@@ -75,6 +75,9 @@ class ProblemManagerDialog(QDialog):
         # 当前加载的题目
         self.current_problem: Optional[Problem] = None
         
+        # 当前编辑的测试用例ID
+        self.current_test_case_id: Optional[str] = None
+        
         # 初始化UI
         self.init_ui()
         
@@ -492,6 +495,9 @@ class ProblemManagerDialog(QDialog):
             
     def load_test_case_details(self):
         """加载所选测试用例的详细信息"""
+        # 先保存当前测试用例的修改（如果有）
+        self.save_current_test_case()
+        
         # 清空当前编辑器
         self.input_editor.clear()
         self.output_editor.clear()
@@ -499,12 +505,15 @@ class ProblemManagerDialog(QDialog):
         # 检查是否有选中的测试用例
         item = self.test_case_list.currentItem()
         if not item or not isinstance(item, TestCaseListItem) or not self.current_problem:
+            self.current_test_case_id = None
             return
             
         case_id = item.case_id
+        self.current_test_case_id = case_id
         
         # 检查测试用例是否存在
         if case_id not in self.current_problem.test_cases:
+            self.current_test_case_id = None
             return
             
         test_case = self.current_problem.test_cases[case_id]
@@ -512,6 +521,27 @@ class ProblemManagerDialog(QDialog):
         # 更新编辑器
         self.input_editor.setText(test_case.input_data)
         self.output_editor.setText(test_case.output_data)
+    
+    def save_current_test_case(self):
+        """临时保存当前测试用例的修改"""
+        if not self.current_problem or not self.current_test_case_id:
+            return
+            
+        # 检查测试用例是否存在
+        if self.current_test_case_id not in self.current_problem.test_cases:
+            return
+            
+        test_case = self.current_problem.test_cases[self.current_test_case_id]
+        
+        # 获取编辑器内容
+        input_data = self.input_editor.toPlainText()
+        output_data = self.output_editor.toPlainText()
+        
+        # 只有当内容有变化时才更新
+        if test_case.input_data != input_data or test_case.output_data != output_data:
+            test_case.input_data = input_data
+            test_case.output_data = output_data
+            self.status_label.setText(f"已临时保存测试点 {self.current_test_case_id} 的修改")
         
     def update_test_cases_zip(self):
         """更新测试用例的zip打包文件"""
@@ -559,13 +589,7 @@ class ProblemManagerDialog(QDialog):
             self.current_problem.description = self.problem_editor.toPlainText()
             
             # 保存当前测试用例修改
-            item = self.test_case_list.currentItem()
-            if item and isinstance(item, TestCaseListItem):
-                case_id = item.case_id
-                if case_id in self.current_problem.test_cases:
-                    test_case = self.current_problem.test_cases[case_id]
-                    test_case.input_data = self.input_editor.toPlainText()
-                    test_case.output_data = self.output_editor.toPlainText()
+            self.save_current_test_case()
             
             # 保存题目
             self.current_problem.save()
@@ -664,249 +688,8 @@ class ProblemManagerDialog(QDialog):
             else:
                 self.status_label.setText(f"显示 {visible_count} 个匹配的测试点")
                 
-    def clear_search(self):
-        """清空搜索框"""
-        if self.test_case_search.hasFocus():
-            self.test_case_search.clear()
-            self.status_label.setText("就绪")
-            
-    # 覆盖showEvent方法，在显示对话框时自动将焦点设置到测试点列表
-    def showEvent(self, event):
-        """显示事件"""
-        super().showEvent(event)
-        # 如果有测试点，则聚焦到测试点列表
-        if self.test_case_list.count() > 0:
-            self.test_case_list.setFocus()
-        # 如果显示的是测试数据标签页，则将tab切换到该页
-        if self.current_problem and self.tab_widget.currentIndex() == 1:
-            self.test_case_search.setFocus()
-            
-    def refresh_problem_list(self):
-        """刷新题目列表"""
-        # 保存当前选中的项目目录
-        current_dir = None
-        if self.problem_list.currentItem():
-            item = self.problem_list.currentItem()
-            if isinstance(item, ProblemListItem):
-                current_dir = item.problem_data["directory"]
-        
-        # 清空列表
-        self.problem_list.clear()
-        
-        # 加载题目列表
-        problems = Problem.list_problems()
-        
-        if not problems:
-            return
-            
-        # 添加到列表
-        for problem_data in problems:
-            item = ProblemListItem(problem_data)
-            self.problem_list.addItem(item)
-            
-        # 恢复选择
-        if current_dir:
-            for i in range(self.problem_list.count()):
-                item = self.problem_list.item(i)
-                if isinstance(item, ProblemListItem) and item.problem_data["directory"] == current_dir:
-                    self.problem_list.setCurrentRow(i)
-                    break
-        elif self.problem_list.count() > 0:
-            self.problem_list.setCurrentRow(0)
-            
-    def load_specific_problem(self, problem_dir: str):
-        """加载指定目录的题目"""
-        for i in range(self.problem_list.count()):
-            item = self.problem_list.item(i)
-            if isinstance(item, ProblemListItem) and item.problem_data["directory"] == problem_dir:
-                self.problem_list.setCurrentRow(i)
-                return
-                
-        # 如果没有找到，尝试直接加载
-        try:
-            self.current_problem = Problem.load(problem_dir)
-            self.update_ui_with_problem()
-        except Exception as e:
-            QMessageBox.warning(self, "错误", f"加载题目失败: {str(e)}")
-            
-    def load_problem_details(self):
-        """加载所选题目的详细信息"""
-        # 清空当前编辑器
-        self.problem_editor.clear()
-        self.test_case_list.clear()
-        self.input_editor.clear()
-        self.output_editor.clear()
-        
-        # 清空搜索框
-        if hasattr(self, 'test_case_search'):
-            self.test_case_search.clear()
-        
-        # 获取所选题目
-        item = self.problem_list.currentItem()
-        if not item or not isinstance(item, ProblemListItem):
-            return
-            
-        problem_dir = item.problem_data["directory"]
-        
-        try:
-            # 加载题目
-            self.current_problem = Problem.load(problem_dir)
-            
-            # 更新UI
-            self.update_ui_with_problem()
-            
-        except Exception as e:
-            QMessageBox.warning(self, "错误", f"加载题目失败: {str(e)}")
-            
-    def update_ui_with_problem(self):
-        """用题目数据更新UI"""
-        if not self.current_problem:
-            return
-            
-        # 更新题目描述
-        self.problem_editor.setText(self.current_problem.description)
-        
-        # 清空搜索框
-        if hasattr(self, 'test_case_search'):
-            self.test_case_search.clear()
-        
-        # 更新测试用例列表
-        self.test_case_list.clear()
-        for case_id, test_case in self.current_problem.test_cases.items():
-            item = TestCaseListItem(case_id, test_case.group)
-            self.test_case_list.addItem(item)
-            
-        # 如果有测试用例，选择第一个
-        if self.test_case_list.count() > 0:
-            self.test_case_list.setCurrentRow(0)
-            
-    def load_test_case_details(self):
-        """加载所选测试用例的详细信息"""
-        # 清空当前编辑器
-        self.input_editor.clear()
-        self.output_editor.clear()
-        
-        # 检查是否有选中的测试用例
-        item = self.test_case_list.currentItem()
-        if not item or not isinstance(item, TestCaseListItem) or not self.current_problem:
-            return
-            
-        case_id = item.case_id
-        
-        # 检查测试用例是否存在
-        if case_id not in self.current_problem.test_cases:
-            return
-            
-        test_case = self.current_problem.test_cases[case_id]
-        
-        # 更新编辑器
-        self.input_editor.setText(test_case.input_data)
-        self.output_editor.setText(test_case.output_data)
-        
-    def update_test_cases_zip(self):
-        """更新测试用例的zip打包文件"""
-        if not self.current_problem:
-            self.status_label.setText("错误：没有加载题目")
-            return False
-            
-        try:
-            # 获取测试用例目录和目标zip文件路径
-            test_cases_dir = os.path.join(self.current_problem.directory, "test_cases")
-            zip_file = os.path.join(self.current_problem.directory, f"{self.current_problem.title}_test_cases.zip")
-            
-            # 检查测试用例目录是否存在
-            if not os.path.exists(test_cases_dir) or not os.path.isdir(test_cases_dir):
-                self.status_label.setText("错误：测试用例目录不存在")
-                return False
-                
-            # 检查测试用例目录中是否有文件
-            files = [f for f in os.listdir(test_cases_dir) if os.path.isfile(os.path.join(test_cases_dir, f))]
-            if not files:
-                self.status_label.setText("错误：测试用例目录为空")
-                return False
-                
-            # 创建zip文件
-            with zipfile.ZipFile(zip_file, "w") as zipf:
-                for file_name in files:
-                    file_path = os.path.join(test_cases_dir, file_name)
-                    zipf.write(file_path, arcname=file_name)
-                    
-            self.status_label.setText(f"成功：已更新测试用例打包文件 ({len(files)} 个文件)")
-            return True
-            
-        except Exception as e:
-            self.status_label.setText(f"错误：{str(e)}")
-            return False
-            
-    def save_problem_changes(self):
-        """保存对题目和测试数据的修改"""
-        if not self.current_problem:
-            self.status_label.setText("错误：没有加载题目")
-            return
-            
-        try:
-            # 保存题目描述
-            self.current_problem.description = self.problem_editor.toPlainText()
-            
-            # 保存当前测试用例修改
-            item = self.test_case_list.currentItem()
-            if item and isinstance(item, TestCaseListItem):
-                case_id = item.case_id
-                if case_id in self.current_problem.test_cases:
-                    test_case = self.current_problem.test_cases[case_id]
-                    test_case.input_data = self.input_editor.toPlainText()
-                    test_case.output_data = self.output_editor.toPlainText()
-            
-            # 保存题目
-            self.current_problem.save()
-            
-            # 更新zip文件
-            zip_result = self.update_test_cases_zip()
-            
-            if zip_result:
-                self.status_label.setText("成功：已保存所有修改并更新打包文件")
-            else:
-                self.status_label.setText("警告：题目已保存，但更新打包文件失败")
-            
-        except Exception as e:
-            self.status_label.setText(f"错误：保存失败：{str(e)}")
-            
-    def delete_problem(self):
-        """删除选中的题目"""
-        item = self.problem_list.currentItem()
-        if not item or not isinstance(item, ProblemListItem):
-            QMessageBox.information(self, "提示", "请先选择一个题目")
-            return
-            
-        problem_dir = item.problem_data["directory"]
-        problem_title = item.problem_data["title"]
-        
-        # 确认删除
-        result = QMessageBox.question(
-            self, "确认删除", 
-            f"确定要删除题目 {problem_title} 吗？\n此操作不可撤销！",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if result != QMessageBox.StandardButton.Yes:
-            return
-            
-        try:
-            # 删除目录
-            shutil.rmtree(problem_dir)
-            
-            # 刷新列表
-            self.refresh_problem_list()
-            
-            # 清空编辑器
-            self.problem_editor.clear()
-            self.test_case_list.clear()
-            self.input_editor.clear()
-            self.output_editor.clear()
-            
-            self.current_problem = None
-            
-            QMessageBox.information(self, "成功", "题目已删除")
-            
-        except Exception as e:
-            QMessageBox.warning(self, "错误", f"删除题目失败: {str(e)}") 
+    def closeEvent(self, event):
+        """关闭事件，确保保存当前测试用例的修改"""
+        # 保存当前测试用例的修改
+        self.save_current_test_case()
+        super().closeEvent(event) 
