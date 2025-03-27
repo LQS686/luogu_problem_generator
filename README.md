@@ -18,7 +18,7 @@
 
 ### 环境要求
 
-- Python 3.8+
+- Python 3.10+
 - PyQt6
 - requests (API调用)
 - 网络连接（用于API调用）
