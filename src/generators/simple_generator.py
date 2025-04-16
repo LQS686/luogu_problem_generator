@@ -91,6 +91,82 @@ class SimpleProblemGenerator(BaseProblemGenerator):
         except Exception as e:
             raise RuntimeError(f"格式化题目失败: {str(e)}")
             
+    def mimic_problem(self, reference_description: str) -> Dict[str, Any]:
+        """
+        根据参考题目生成一个类似的题目（换汤不换药）
+        参数:
+            reference_description: 参考题目的完整描述
+        返回:
+            包含生成的题目信息的字典
+        """
+        if not reference_description:
+            raise ValueError("参考题目描述不能为空")
+            
+        # 构建指导模仿出题的提示词
+        prompt = f"""
+请分析下面的算法竞赛题目，然后创建一个新题目，要求与原题目具有相同的算法核心和解题思路，但变更题目的具体情景、数字和细节。这就是所谓的"换汤不换药"，即保持相同的算法本质，但改变题目的表现形式。
+
+## 参考题目
+{reference_description}
+
+请创建一个新题目，要求：
+1. 保持与原题目相同的算法核心和解题思路
+2. 完全改变题目的情景和背景故事
+3. 修改数字、变量和具体限制条件，但保持问题的难度级别相似
+4. 创建与原题目结构相似但内容不同的测试用例
+5. 新题目应该独立完整，具有与原题目一样的标准格式
+
+请按照以下JSON格式返回结果:
+{{
+    "title": "新题目名称",
+    "description": "新题目描述（有趣的情景与角色，但核心算法与原题相同）",
+    "input_format": "输入格式（与原题逻辑相似，但描述可不同）",
+    "output_format": "输出格式（与原题逻辑相似，但描述可不同）",
+    "samples": [
+        {{"input": "样例输入1", "output": "样例输出1", "explanation": "样例解释1（可选）"}},
+        {{"input": "样例输入2", "output": "样例输出2", "explanation": "样例解释2（可选）"}}
+    ],
+    "hints": "数据范围与提示（可以修改具体数字，但复杂度级别应相似）",
+    "difficulty": 难度等级(保持与原题相近，1-5之间的整数),
+    "time_limit": 时间限制(毫秒),
+    "memory_limit": 内存限制(MB),
+    "algorithm_relationship": "这道题与原题的算法关系简述（说明两题的共通点和差异）"
+}}
+
+确保新题目是有趣且富有创意的，但在算法本质上与原题相同，能够测试相同的编程和算法技能。
+"""
+        
+        try:
+            # 调用API获取模仿生成的题目
+            response = call_api(prompt)
+            
+            # 使用基类中的方法解析返回的JSON
+            problem_data = self.parse_api_response(response)
+            
+            # 确保必要字段存在
+            required_fields = ["title", "description", "difficulty"]
+            for field in required_fields:
+                if field not in problem_data:
+                    raise ValueError(f"生成的题目缺少必要字段: {field}")
+            
+            # 设置默认值
+            if "time_limit" not in problem_data:
+                problem_data["time_limit"] = 1000
+            if "memory_limit" not in problem_data:
+                problem_data["memory_limit"] = 128
+                
+            # 使用基类方法处理描述，合并相关字段
+            problem_data["description"] = self.process_description(problem_data)
+            
+            # 添加算法关系说明到描述末尾
+            if "algorithm_relationship" in problem_data:
+                problem_data["description"] += f"\n\n## 算法关系\n{problem_data['algorithm_relationship']}"
+            
+            return problem_data
+            
+        except Exception as e:
+            raise RuntimeError(f"模仿题目生成失败: {str(e)}")
+            
     def generate_test_cases(self) -> List[Tuple[str, str]]:
         """
         生成测试数据
