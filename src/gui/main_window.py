@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QTextEdit, QLabel, QProgressBar, QStatusBar, QTabWidget,
     QCheckBox, QPushButton, QMessageBox, QFileDialog, QToolBar,
-    QDockWidget, QApplication, QDialog, QLineEdit, QRadioButton
+    QDockWidget, QApplication, QDialog, QLineEdit
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal, pyqtSlot, QThread, QTimer, QPropertyAnimation
 from PyQt6.QtGui import QAction, QIcon, QFont, QTextCursor, QIntValidator, QPalette, QColor
@@ -132,77 +132,6 @@ class GeneratorThread(QThread):
             
         except Exception as e:
             error_msg = f"生成过程中出错: {str(e)}\n{traceback.format_exc()}"
-            self.generation_failed.emit(error_msg)
-
-
-class MimicGeneratorThread(QThread):
-    """模仿出题线程"""
-    progress_update = pyqtSignal(str)
-    generation_completed = pyqtSignal(Problem)
-    generation_failed = pyqtSignal(str)
-    
-    def __init__(self, generator: BaseProblemGenerator, reference_description: str, test_cases_count: int = 10):
-        super().__init__()
-        self.generator = generator
-        self.reference_description = reference_description
-        self.test_cases_count = test_cases_count
-        
-    def run(self):
-        try:
-            # 设置生成器参数
-            self.generator.test_cases_count = self.test_cases_count
-                
-            # 生成模仿题目
-            self.progress_update.emit("正在分析参考题目...")
-            problem_data = self.generator.mimic_problem(self.reference_description)
-            if not problem_data:
-                self.generation_failed.emit("模仿题目生成失败")
-                return
-                
-            # 设置problem_description用于后续生成测试数据
-            self.generator.problem_description = problem_data.get("description", "")
-            
-            # 生成测试数据
-            self.progress_update.emit("正在生成测试数据...")
-            test_cases = self.generator.generate_test_cases()
-            if not test_cases:
-                self.generation_failed.emit("测试数据生成失败")
-                return
-                
-            # 创建Problem对象，使用生成器中已有的题目信息
-            self.progress_update.emit("正在保存题目和测试数据...")
-            problem_obj = Problem(
-                title=problem_data.get("title", "未命名题目"),
-                description=problem_data.get("description", ""),
-                difficulty=problem_data.get("difficulty", 0),
-                time_limit=problem_data.get("time_limit", 1000),
-                memory_limit=problem_data.get("memory_limit", 128),
-                has_subtasks=False  # 模仿生成不支持子任务
-            )
-            
-            # 设置题目目录为生成器已创建的目录
-            if self.generator.current_problem_dir:
-                problem_obj.directory = self.generator.current_problem_dir
-                
-            # 添加测试用例
-            for i, (input_data, output_data) in enumerate(test_cases, 1):
-                case_id = str(i)
-                test_case = TestCase(
-                    case_id=case_id,
-                    input_data=input_data,
-                    output_data=output_data,
-                    group=0
-                )
-                problem_obj.add_test_case(test_case)
-            
-            # 创建zip包
-            problem_obj.create_zip_package()
-            
-            self.progress_update.emit("模仿题目生成完成!")
-            self.generation_completed.emit(problem_obj)
-            
-        except Exception as e:
-            error_msg = f"模仿生成过程中出错: {str(e)}\n{traceback.format_exc()}"
             self.generation_failed.emit(error_msg)
 
 
@@ -329,78 +258,86 @@ class MainWindow(QMainWindow):
         top_layout.setContentsMargins(16, 16, 16, 12)  # 增加内边距
         top_layout.setSpacing(10)  # 增加元素间距
         
-        # 题目类型选择标签
-        generation_type_label = QLabel("选择生成模式:")
-        top_layout.addWidget(generation_type_label)
+        # 标题和描述区域
+        title_layout = QHBoxLayout()
+        title_layout.setSpacing(10)
         
-        # 生成模式选择
-        generation_type_layout = QHBoxLayout()
-        generation_type_layout.setSpacing(10)
+        title_label = QLabel("题目描述")
+        title_label.setObjectName("cardTitle")
+        title_label.setMinimumHeight(32)  # 增加高度
+        title_layout.addWidget(title_label)
         
-        # 常规生成模式（默认）
-        self.normal_generation_radio = QRadioButton("常规生成")
-        self.normal_generation_radio.setChecked(True)
-        self.normal_generation_radio.toggled.connect(self.toggle_generation_mode)
-        generation_type_layout.addWidget(self.normal_generation_radio)
+        title_layout.addStretch()
         
-        # 模仿出题模式
-        self.mimic_generation_radio = QRadioButton("模仿出题")
-        self.mimic_generation_radio.toggled.connect(self.toggle_generation_mode)
-        generation_type_layout.addWidget(self.mimic_generation_radio)
+        # 提示标签 - 更优雅的样式
+        tip_label = QLabel("详细的描述有助于生成更准确的题目")
+        tip_label.setObjectName("tipLabel")
+        tip_label.setStyleSheet("""
+            QLabel#tipLabel {
+                color: #888888;
+                font-style: italic;
+                padding: 4px 8px;
+            }
+        """)
+        title_layout.addWidget(tip_label)
         
-        generation_type_layout.addStretch()
-        top_layout.addLayout(generation_type_layout)
+        top_layout.addLayout(title_layout)
         
-        # 描述标签
-        self.description_label = QLabel("题目描述（输入您想要生成的题目类型、难度等要求）:")
-        top_layout.addWidget(self.description_label)
+        # 描述输入框 - 优化样式和大小
+        self.description_edit = QTextEdit()
+        self.description_edit.setObjectName("descriptionEdit")
+        self.description_edit.setPlaceholderText("在这里输入题目描述，例如：\n- 输入三个整数，输出其中的最大值\n- 判断一个数是否为质数\n- 计算斐波那契数列的第n项")
+        self.description_edit.setMinimumHeight(180)  # 保持较大高度
+        top_layout.addWidget(self.description_edit)
         
-        # 题目描述输入框
-        self.description_input = QTextEdit()
-        self.description_input.setMinimumHeight(150)
-        top_layout.addWidget(self.description_input)
+        # 选项区域 - 更现代的卡片式设计
+        options_card = QWidget()
+        options_card.setObjectName("optionsCard")
+        options_layout = QHBoxLayout(options_card)
+        options_layout.setContentsMargins(16, 10, 16, 10)  # 增加水平内边距
+        options_layout.setSpacing(16)  # 增加元素间距
         
-        # 参考题目标签和输入框（初始隐藏，模仿模式下显示）
-        self.reference_label = QLabel("参考题目（输入完整的题目描述，将生成类似题目）:")
-        self.reference_label.setVisible(False)
-        top_layout.addWidget(self.reference_label)
+        # 左侧选项组 - 改为垂直布局
+        left_options = QVBoxLayout()
+        left_options.setSpacing(10)  # 调整垂直间距
         
-        self.reference_input = QTextEdit()
-        self.reference_input.setMinimumHeight(150)
-        self.reference_input.setVisible(False)
-        top_layout.addWidget(self.reference_input)
-        
-        # 选项区域
-        options_layout = QHBoxLayout()
-        
-        # 测试点数量
+        # 删除子任务选项，只保留测试点数量设置
+        # 测试点数量 - 独立一行
         test_cases_layout = QHBoxLayout()
+        test_cases_layout.setSpacing(8)
+        
         test_cases_label = QLabel("测试点数量:")
+        test_cases_label.setObjectName("optionLabel")
+        test_cases_label.setMinimumHeight(32)  # 增加高度
         test_cases_layout.addWidget(test_cases_label)
         
-        self.test_cases_count = QLineEdit()
+        self.test_cases_count = QLineEdit("10")
+        self.test_cases_count.setObjectName("numericInput")
+        self.test_cases_count.setToolTip("指定生成的测试点数量")
+        self.test_cases_count.setFixedWidth(56)  # 稍微增加宽度
+        self.test_cases_count.setFixedHeight(32)  # 保持与其他控件一致
         self.test_cases_count.setValidator(QIntValidator(1, 100))
-        self.test_cases_count.setText("10")
-        self.test_cases_count.setMaximumWidth(50)
+        self.test_cases_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
         test_cases_layout.addWidget(self.test_cases_count)
+        test_cases_layout.addStretch()  # 添加弹性空间，使组件左对齐
         
-        options_layout.addLayout(test_cases_layout)
+        left_options.addLayout(test_cases_layout)
+        options_layout.addLayout(left_options)
+        
         options_layout.addStretch()
         
-        # 生成按钮
+        # 生成按钮 - 更醒目的样式
         self.generate_button = QPushButton("生成题目")
-        self.generate_button.setMinimumWidth(150)
+        self.generate_button.setObjectName("primaryButton")
         self.generate_button.clicked.connect(self.start_generation)
+        self.generate_button.setMinimumWidth(140)  # 增加宽度
+        self.generate_button.setMinimumHeight(38)  # 增加高度
+        self.generate_button.setToolTip("根据描述生成完整题目")
         options_layout.addWidget(self.generate_button)
         
-        # 模仿生成按钮（初始隐藏）
-        self.mimic_button = QPushButton("模仿生成")
-        self.mimic_button.setMinimumWidth(150)
-        self.mimic_button.clicked.connect(self.start_mimic_generation)
-        self.mimic_button.setVisible(False)
-        options_layout.addWidget(self.mimic_button)
+        top_layout.addWidget(options_card)
         
-        top_layout.addLayout(options_layout)
+        # 添加顶部组件到分割器
         splitter.addWidget(top_widget)
         
         # 底部区域 - 输出和日志
@@ -534,12 +471,6 @@ class MainWindow(QMainWindow):
         self.about_action.triggered.connect(self.show_about)
         self.about_action.setIcon(about_icon)
         
-        # 模仿题目生成
-        self.mimic_action = QAction("模仿出题", self)
-        self.mimic_action.triggered.connect(lambda: self.mimic_generation_radio.setChecked(True))
-        if hasattr(self, 'icon_cache') and "copy" in self.icon_cache:
-            self.mimic_action.setIcon(self.icon_cache["copy"])
-        
     def create_toolbars(self):
         """创建工具栏，包含原菜单栏的所有功能"""
         # 主工具栏
@@ -612,11 +543,6 @@ class MainWindow(QMainWindow):
         self.about_action.setToolTip("显示版本和版权信息")
         main_toolbar.addAction(self.about_action)
         
-        # 模仿题目生成
-        self.mimic_action.setText("模仿出题")
-        self.mimic_action.setToolTip("模仿出题")
-        main_toolbar.addAction(self.mimic_action)
-        
         # 增加退出按钮
         exit_button = QAction("退出", self)
         exit_button.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DialogCloseButton))
@@ -648,7 +574,7 @@ class MainWindow(QMainWindow):
     
     def clear_all(self):
         """清空所有输入和输出"""
-        self.description_input.clear()
+        self.description_edit.clear()
         self.result_text.clear()
         self.statusBar().showMessage("已清空")
         self.current_problem = None
@@ -666,7 +592,7 @@ class MainWindow(QMainWindow):
     def start_generation(self):
         """开始生成题目"""
         # 获取题目描述
-        description = self.description_input.toPlainText().strip()
+        description = self.description_edit.toPlainText().strip()
         if not description:
             QMessageBox.warning(self, "警告", "请输入题目描述")
             return
@@ -951,105 +877,6 @@ class MainWindow(QMainWindow):
 </div>
 """
         self.result_text.setHtml(example_msg)
-
-    def toggle_generation_mode(self):
-        """切换生成模式（常规/模仿）"""
-        if self.normal_generation_radio.isChecked():
-            # 常规模式
-            self.description_label.setText("题目描述（输入您想要生成的题目类型、难度等要求）:")
-            self.reference_label.setVisible(False)
-            self.reference_input.setVisible(False)
-            self.generate_button.setVisible(True)
-            self.mimic_button.setVisible(False)
-        else:
-            # 模仿模式
-            self.description_label.setText("新题目要求（可选，指定新题目的特定要求）:")
-            self.reference_label.setVisible(True)
-            self.reference_input.setVisible(True)
-            self.generate_button.setVisible(False)
-            self.mimic_button.setVisible(True)
-
-    def start_mimic_generation(self):
-        """开始模仿出题过程"""
-        # 获取参考题目
-        reference_description = self.reference_input.toPlainText().strip()
-        if not reference_description:
-            QMessageBox.warning(self, "错误", "请输入参考题目描述")
-            return
-            
-        # 获取附加要求（可选）
-        additional_requirements = self.description_input.toPlainText().strip()
-        
-        # 禁用按钮，防止重复点击
-        self.mimic_button.setEnabled(False)
-        
-        # 显示进度条
-        self.progress_bar.setValue(0)
-        self.progress_bar.setVisible(True)
-        
-        # 清空结果显示
-        self.result_text.clear()
-        
-        # 添加附加要求到参考描述
-        if additional_requirements:
-            # 如果有附加要求，将其显示在日志中
-            self.result_text.append(f"附加要求: {additional_requirements}\n")
-            full_reference = f"{reference_description}\n\n附加要求：{additional_requirements}"
-        else:
-            full_reference = reference_description
-        
-        # 验证API密钥
-        if not self.api_key:
-            result = QMessageBox.question(
-                self, "API密钥缺失", 
-                "未设置API密钥，是否现在配置？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if result == QMessageBox.StandardButton.Yes:
-                self.configure_api_key()
-                # 如果用户取消了配置，不继续生成
-                if not self.api_key:
-                    self.mimic_button.setEnabled(True)
-                    return
-            else:
-                self.mimic_button.setEnabled(True)
-                return
-        
-        # 创建生成器实例
-        try:
-            from ..generators.simple_generator import SimpleProblemGenerator
-            generator = SimpleProblemGenerator()
-        except ImportError:
-            # 绝对导入作为后备
-            from src.generators.simple_generator import SimpleProblemGenerator
-            generator = SimpleProblemGenerator()
-        
-        # 设置API密钥
-        from ..utils.api_utils import set_api_key
-        set_api_key(self.api_key)
-        
-        # 获取测试点数量
-        try:
-            test_cases_count = int(self.test_cases_count.text())
-        except ValueError:
-            test_cases_count = 10
-        
-        # 创建并启动模仿生成线程
-        self.mimic_thread = MimicGeneratorThread(
-            generator=generator,
-            reference_description=full_reference,
-            test_cases_count=test_cases_count
-        )
-        self.mimic_thread.progress_update.connect(self.update_progress)
-        self.mimic_thread.generation_completed.connect(self.generation_completed)
-        self.mimic_thread.generation_failed.connect(self.generation_failed)
-        self.mimic_thread.finished.connect(self.finish_generation)
-        
-        # 显示状态
-        self.statusBar().showMessage("正在模仿生成题目...")
-        
-        # 启动线程
-        self.mimic_thread.start()
 
 
 def main():
