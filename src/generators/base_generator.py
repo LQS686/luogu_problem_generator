@@ -63,24 +63,78 @@ class BaseProblemGenerator(ABC):
     
     def process_description(self, problem_data: Dict[str, Any]) -> str:
         """
-        处理描述，合并相关字段
+        处理描述，合并相关字段，优化格式使其更加美观
         """
-        # 确保标题作为描述的第一行
+        # 确保标题作为描述的第一行，使用更加美观的标题格式
         title = problem_data.get("title", "未命名题目")
-        description = f"# {title}\n\n{problem_data['description']}"
+        description = f"# {title}\n\n"
         
-        # 如果description中没有包含输入输出格式和示例，则添加这些信息
-        if ("输入格式" not in description or "输出格式" not in description) and "input_format" in problem_data:
-            description += f"\n\n## 输入格式\n{problem_data.get('input_format', '')}"
-            description += f"\n\n## 输出格式\n{problem_data.get('output_format', '')}"
-            
-        if "样例" not in description and "示例" not in description and "samples" in problem_data:
-            description += f"\n\n## 样例\n### 输入\n```\n{problem_data.get('samples', [{}])[0].get('input', '')}\n```"
-            description += f"\n\n### 输出\n```\n{problem_data.get('samples', [{}])[0].get('output', '')}\n```"
-            
-        if "提示" not in description and "hints" in problem_data and problem_data["hints"]:
-            description += f"\n\n## 提示\n{problem_data.get('hints', '')}"
-            
+        # 主体描述，确保段落之间有适当的空行
+        main_desc = problem_data.get('description', '')
+        # 如果描述中已有标题部分，移除它，避免重复
+        if main_desc.startswith(f"# {title}") or main_desc.startswith(f"#{title}"):
+            # 找到第一个换行符后的内容
+            main_desc = main_desc[main_desc.find('\n')+1:].strip()
+        description += main_desc
+        
+        # 优化标题格式，确保所有标题前后都有空行
+        sections = []
+        
+        # 处理输入格式部分
+        if ("## 输入格式" not in description and "输入格式" not in description) and "input_format" in problem_data:
+            input_format = problem_data.get('input_format', '').strip()
+            if input_format:
+                sections.append(f"## 输入格式\n\n{input_format}")
+        
+        # 处理输出格式部分
+        if ("## 输出格式" not in description and "输出格式" not in description) and "output_format" in problem_data:
+            output_format = problem_data.get('output_format', '').strip()
+            if output_format:
+                sections.append(f"## 输出格式\n\n{output_format}")
+        
+        # 处理样例部分
+        if ("## 样例" not in description and "## 示例" not in description and 
+                "样例" not in description and "示例" not in description) and "samples" in problem_data:
+            samples = problem_data.get('samples', [{}])
+            if samples:
+                sample_section = "## 样例\n\n"
+                for i, sample in enumerate(samples, 1):
+                    if len(samples) > 1:
+                        sample_section += f"### 样例 {i}\n\n"
+                    
+                    sample_input = sample.get('input', '').strip()
+                    sample_output = sample.get('output', '').strip()
+                    
+                    sample_section += f"#### 输入\n```\n{sample_input}\n```\n\n"
+                    sample_section += f"#### 输出\n```\n{sample_output}\n```\n\n"
+                    
+                    # 如果有样例解释，添加它
+                    if 'explanation' in sample and sample['explanation']:
+                        explanation = sample['explanation'].strip()
+                        sample_section += f"#### 解释\n{explanation}\n\n"
+                
+                sections.append(sample_section.strip())
+        
+        # 处理提示部分
+        if "## 提示" not in description and "提示" not in description and "hints" in problem_data and problem_data["hints"]:
+            hints = problem_data.get('hints', '').strip()
+            if hints:
+                sections.append(f"## 提示\n\n{hints}")
+        
+        # 将所有部分组合起来，确保它们之间有足够的空行
+        if sections:
+            description += "\n\n" + "\n\n".join(sections)
+        
+        # 优化数学公式的显示（确保$符号周围有适当的空格）
+        description = re.sub(r'(?<!\s)\$', ' $', description)  # 在$前添加空格（如果没有）
+        description = re.sub(r'\$(?!\s)', '$ ', description)  # 在$后添加空格（如果没有）
+        
+        # 确保所有段落之间有空行
+        description = re.sub(r'\n{3,}', '\n\n', description)  # 将多个空行替换为两个空行
+        
+        # 为列表项增加适当的间距
+        description = re.sub(r'(\n\d+\..*?)(\n\d+\.)', r'\1\n\2', description)
+        
         return description
     
     def extract_sample_data(self, description: str) -> Tuple[str, str, str, str]:
@@ -91,24 +145,63 @@ class BaseProblemGenerator(ABC):
         output_format = ""
         samples = ""
         
-        # 提取输入格式
-        input_match = re.search(r'## 输入格式\s*([\s\S]*?)(?=## |$)', description)
+        # 提取输入格式 - 匹配更多可能的格式化方式
+        input_match = re.search(r'##\s+输入格式\s*([\s\S]*?)(?=##\s+|$)', description)
         if input_match:
             input_format = input_match.group(1).strip()
             
         # 提取输出格式
-        output_match = re.search(r'## 输出格式\s*([\s\S]*?)(?=## |$)', description)
+        output_match = re.search(r'##\s+输出格式\s*([\s\S]*?)(?=##\s+|$)', description)
         if output_match:
             output_format = output_match.group(1).strip()
             
-        # 提取样例
-        samples_match = re.search(r'## 样例(?:\s*\d*)?(?:\s*\d)?\s*([\s\S]*?)(?=## |$)', description)
+        # 提取样例 - 处理可能的多个样例
+        samples_section = ""
+        samples_match = re.search(r'##\s+样例(?:\s*\d*)?(?:\s*\d)?\s*([\s\S]*?)(?=##\s+|$)', description)
         if not samples_match:
-            samples_match = re.search(r'### 输入[\s\S]*?```([\s\S]*?)```[\s\S]*?### 输出[\s\S]*?```([\s\S]*?)```', description)
-            if samples_match:
-                samples = f"输入:\n{samples_match.group(1).strip()}\n\n输出:\n{samples_match.group(2).strip()}"
-        else:
-            samples = samples_match.group(1).strip()
+            samples_match = re.search(r'##\s+示例(?:\s*\d*)?(?:\s*\d)?\s*([\s\S]*?)(?=##\s+|$)', description)
+            
+        if samples_match:
+            samples_section = samples_match.group(1).strip()
+        
+        # 如果找到了样例部分，解析所有的输入/输出对
+        if samples_section:
+            # 处理多个样例的情况
+            sample_pairs = []
+            
+            # 查找所有 "输入" 和 "输出" 模式
+            input_blocks = re.findall(r'(?:###\s+样例\s+\d+\s*\n)?\s*####?\s+输入\s*\n```\s*([\s\S]*?)```', samples_section)
+            output_blocks = re.findall(r'####?\s+输出\s*\n```\s*([\s\S]*?)```', samples_section)
+            explanation_blocks = re.findall(r'####?\s+解释\s*\n([\s\S]*?)(?=####?\s+|$)', samples_section)
+            
+            # 确保找到的输入和输出块数量相同
+            min_blocks = min(len(input_blocks), len(output_blocks))
+            
+            for i in range(min_blocks):
+                sample_input = input_blocks[i].strip()
+                sample_output = output_blocks[i].strip()
+                sample_explanation = ""
+                if i < len(explanation_blocks):
+                    sample_explanation = explanation_blocks[i].strip()
+                    
+                sample_pair = f"输入:\n{sample_input}\n\n输出:\n{sample_output}"
+                if sample_explanation:
+                    sample_pair += f"\n\n解释:\n{sample_explanation}"
+                    
+                sample_pairs.append(sample_pair)
+            
+            # 将所有样例组合在一起
+            if sample_pairs:
+                samples = "\n\n".join(sample_pairs)
+        
+        # 如果上面的方法没有找到样例，尝试更简单的模式匹配
+        if not samples:
+            # 寻找最基本的样例格式
+            basic_match = re.search(r'###\s+输入[\s\S]*?```([\s\S]*?)```[\s\S]*?###\s+输出[\s\S]*?```([\s\S]*?)```', description)
+            if basic_match:
+                sample_input = basic_match.group(1).strip()
+                sample_output = basic_match.group(2).strip()
+                samples = f"输入:\n{sample_input}\n\n输出:\n{sample_output}"
         
         title = self.problem_name.replace("_", " ")
         
